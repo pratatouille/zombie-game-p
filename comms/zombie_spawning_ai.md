@@ -1,7 +1,8 @@
 # Zombie Spawning & AI - Feature Specification & Status
 
 **Owner:** Pratyush  
-**Scope:** Fast/aggressive Zombie AI, ground emergence animation, spread-out wave spawner, and combat integration hooks.
+**Scope:** Fast/aggressive Zombie AI, ground emergence animation, spread-out wave spawner, and combat integration hooks.  
+**Pull Request:** [#2](https://github.com/blankRiot96/zombie-game/pull/2) (`feat/zombie-spawning-ai`)
 
 ---
 
