@@ -47,6 +47,9 @@ class Projectile:
         position: tuple[float, float],
         effects: EffectManager,
         players: list[Player],
+        zombies: list[any] | None = None,
+        on_zombie_hit: any = None,
+        on_zombie_kill: any = None,
     ) -> None:
         """Detonate explosive projectile, damaging nearby opponents and triggering visual effects."""
         if self._detonated:
@@ -82,6 +85,30 @@ class Projectile:
                     kb_power = 480.0 * falloff
                     p.take_damage(actual_dmg, knockback=(push_dir.x * kb_power, push_dir.y * kb_power - 120.0))
 
+            # Radial damage to zombies
+            if zombies:
+                for z in zombies:
+                    if not z.alive():
+                        continue
+                    zc = z.center()
+                    dx = zc[0] - blast_pos[0]
+                    dy = zc[1] - blast_pos[1]
+                    dist = math.hypot(dx, dy)
+                    if dist <= blast_radius:
+                        falloff = max(0.3, 1.0 - (dist / blast_radius))
+                        actual_dmg = self.damage * falloff
+                        push_dir = pygame.Vector2(dx, dy)
+                        if push_dir.length_squared() > 0:
+                            push_dir = push_dir.normalize()
+                        else:
+                            push_dir = pygame.Vector2(0, -1)
+                        kb_power = 520.0 * falloff
+                        killed = z.take_damage(actual_dmg, knockback=(push_dir.x * kb_power, push_dir.y * kb_power - 140.0), effects=effects)
+                        if on_zombie_hit:
+                            on_zombie_hit(z)
+                        if killed and on_zombie_kill:
+                            on_zombie_kill(z)
+
         else:
             # Impact spark burst for standard projectiles
             palette = [(255, 230, 100), (255, 120, 40)]
@@ -96,6 +123,9 @@ class Projectile:
         world_bounds: pygame.Rect,
         players: list[Player],
         effects: EffectManager,
+        zombies: list[any] | None = None,
+        on_zombie_hit: any = None,
+        on_zombie_kill: any = None,
     ) -> None:
         """Update projectile physics, trails, and collision detection."""
         if self._expired:
@@ -123,7 +153,7 @@ class Projectile:
         # Check world bounds collision
         if not world_bounds.colliderect(box):
             if self.kind == "bomb":
-                self.detonate((self.position.x, self.position.y), effects, players)
+                self.detonate((self.position.x, self.position.y), effects, players, zombies, on_zombie_hit, on_zombie_kill)
             else:
                 self._expired = True
             return
@@ -137,11 +167,32 @@ class Projectile:
 
         if hit_platform:
             if self.kind == "bomb":
-                self.detonate((self.position.x, self.position.y), effects, players)
+                self.detonate((self.position.x, self.position.y), effects, players, zombies, on_zombie_hit, on_zombie_kill)
             else:
                 effects.burst((self.position.x, self.position.y), count=8, palette=[(200, 200, 200), (255, 220, 100)])
                 self._expired = True
             return
+
+        # Check zombie collisions
+        if zombies:
+            for z in zombies:
+                if not z.alive():
+                    continue
+                if box.colliderect(z.bounds()):
+                    if self.kind == "bomb":
+                        self.detonate((self.position.x, self.position.y), effects, players, zombies, on_zombie_hit, on_zombie_kill)
+                    else:
+                        kb_dir = 1 if self.velocity.x >= 0 else -1
+                        kb = (kb_dir * 300.0, -150.0)
+                        killed = z.take_damage(self.damage, knockback=kb, effects=effects)
+                        effects.burst((self.position.x, self.position.y), count=12, palette=[(180, 50, 50), (60, 150, 60)])
+                        effects.request_shake(intensity=4.0, duration=0.12)
+                        self._expired = True
+                        if on_zombie_hit:
+                            on_zombie_hit(z)
+                        if killed and on_zombie_kill:
+                            on_zombie_kill(z)
+                    return
 
         # Check player collisions
         for p in players:
@@ -149,7 +200,7 @@ class Projectile:
                 continue
             if box.colliderect(p.bounds()):
                 if self.kind == "bomb":
-                    self.detonate((self.position.x, self.position.y), effects, players)
+                    self.detonate((self.position.x, self.position.y), effects, players, zombies, on_zombie_hit, on_zombie_kill)
                 else:
                     # Direct bullet or wand hit
                     kb_dir = 1 if self.velocity.x >= 0 else -1
@@ -230,10 +281,13 @@ class ProjectileManager:
         world_bounds: pygame.Rect,
         players: list[Player],
         effects: EffectManager,
+        zombies: list[any] | None = None,
+        on_zombie_hit: any = None,
+        on_zombie_kill: any = None,
     ) -> None:
         """Update all active projectiles."""
         for proj in self.projectiles:
-            proj.update(dt, platforms, world_bounds, players, effects)
+            proj.update(dt, platforms, world_bounds, players, effects, zombies, on_zombie_hit, on_zombie_kill)
         self.remove_expired()
 
     def draw(self, surface: pygame.Surface, camera: Camera) -> None:

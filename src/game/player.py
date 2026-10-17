@@ -61,6 +61,7 @@ class Player:
         self.damage_flash: float = 0.0
         self.shield_timer: float = 0.0
         self.attack_recoil: float = 0.0
+        self._punch_cooldown: float = 0.0
 
         # 3-segment trailing scarf nodes
         self.scarf_nodes: list[pygame.Vector2] = [
@@ -189,20 +190,48 @@ class Player:
             if self.velocity.y < -120.0:
                 self.velocity.y += (self.config.gravity * 1.6) * dt
 
-    def attack(self, projectiles: list[Projectile], effects: EffectManager) -> None:
-        """Fire or use the currently held item with visual casting recoil."""
+    def attack(
+        self,
+        projectiles: list[Projectile],
+        effects: EffectManager,
+        zombies: list[any] | None = None,
+        on_zombie_hit: any = None,
+        on_zombie_kill: any = None,
+    ) -> bool:
+        """Fire or use the currently held item with visual casting recoil. Returns True if an attack was made."""
         if not self.alive():
-            return
+            return False
 
         if self.held_item:
             prev_ammo = self.held_item.ammo
             self.held_item.use(self, projectiles, effects)
             if self.held_item and self.held_item.ammo < prev_ammo:
                 self.attack_recoil = 0.16
+                return True
+            return False
         else:
+            if self._punch_cooldown > 0:
+                return False
+            self._punch_cooldown = 0.32
             cx, cy = self.center()
-            effects.burst((cx + self.facing * 20, cy), count=3, palette=[(255, 255, 200)])
-            self.attack_recoil = 0.12
+            effects.burst((cx + self.facing * 24, cy), count=5, palette=[(255, 255, 200), (255, 210, 80)])
+            self.attack_recoil = 0.14
+
+            # Punch hitbox strikes zombies directly in front of player
+            if zombies:
+                fist_w = 42
+                fist_x = int(self.position.x + (6 if self.facing > 0 else -fist_w - 6))
+                fist_box = pygame.Rect(fist_x, int(self.position.y - self.height * 0.85), fist_w, int(self.height * 0.75))
+                for z in zombies:
+                    if z.alive() and fist_box.colliderect(z.bounds()):
+                        kb = (self.facing * 380.0, -180.0)
+                        killed = z.take_damage(25.0, knockback=kb, effects=effects)
+                        effects.request_shake(intensity=4.5, duration=0.14)
+                        if on_zombie_hit:
+                            on_zombie_hit(z)
+                        if killed and on_zombie_kill:
+                            on_zombie_kill(z)
+            return True
 
     def update(
         self,
@@ -215,6 +244,8 @@ class Player:
         self.prev_bottom = self.position.y
 
         # Timers decay
+        if self._punch_cooldown > 0:
+            self._punch_cooldown = max(0.0, self._punch_cooldown - dt)
         if self.damage_flash > 0:
             self.damage_flash = max(0.0, self.damage_flash - dt)
         if self.shield_timer > 0:
